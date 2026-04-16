@@ -1,0 +1,42 @@
+# Venti - Anemo Archon FastCGI Pool
+
+# Слушатель
+listener:
+  type: unix  # unix или tcp
+  address: /run/venti/venti.sock
+
+# Корень со скриптами
+script_root: /var/www/scripts
+
+# Сила Анемо (пул процессов)
+anemo_power:
+  # Мин. количество бардов (воркеров)
+  min_bards: 4
+  
+  # Макс. количество бардов
+  max_bards: 20
+  
+  # Время бездействия перед уходом на покой (сек)
+  idle_timeout: 60
+  
+  # Время жизни барда (сек)
+  max_lifetime: 3600
+
+# Время исполнения песен (таймауты)
+timeouts:
+  song_duration: 30      # исполнение скрипта
+  tune_up: 5             # запуск процесса
+
+# Логирование
+logging:
+  level: info            # debug, info, warn, error
+  file: /var/log/venti/access.log
+  format: json
+
+# Путь к Perl
+perl_path: /usr/bin/perl
+
+# Ограничения
+limits:
+  max_verse_size: 10485760   # размер стиха (тела запроса) 10 MB
+  max_songs_per_bard: 1000   # песен на барда
