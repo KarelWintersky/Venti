@@ -32,11 +32,26 @@ type Troupe struct {
     nextID     int64
 }
 
+// Интерфейс для пула (определяем здесь, чтобы избежать циклических зависимостей)
+type BardPool interface {
+    CallBard(ctx context.Context) (Bard, error)
+    ReleaseBard(bard Bard)
+}
+
+type Bard interface {
+    Sing(ctx context.Context, songPath string, lyrics []string, melody []byte) ([]byte, error)
+    Rest() error
+    IsHealthy() bool
+    GetSongCount() int
+    GetBirthTime() time.Time
+    GetLastSongTime() time.Time
+}
+
 func (t *Troupe) Recruit() (*Performer, error) {
     id := atomic.AddInt64(&t.nextID, 1)
     names := []string{"Venti", "Barbatos", "Tone-Deaf Bard", "Windborne Minstrel"}
     name := names[id%int64(len(names))]
-    
+
     return &Performer{
         id:         id,
         name:       name,
@@ -115,35 +130,35 @@ func (p *Performer) GetName() string {
 }
 
 type Stage struct {
-    anemoPower *AnemoPower
+    anemoPower BardPool
 }
 
-func NewStage(anemoPower *AnemoPower) *Stage {
+func NewStage(anemoPower BardPool) *Stage {
     return &Stage{anemoPower: anemoPower}
 }
 
 func (s *Stage) Perform(w http.ResponseWriter, r *http.Request) {
     // Готовим партитуру (окружение)
     lyrics := prepareLyrics(r)
-    
+
     // Читаем мелодию (тело запроса)
     melody, err := io.ReadAll(r.Body)
     if err != nil {
         http.Error(w, "Failed to read melody", http.StatusBadRequest)
         return
     }
-    
+
     // Призываем барда
     ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
     defer cancel()
-    
+
     bard, err := s.anemoPower.CallBard(ctx)
     if err != nil {
         http.Error(w, "No bards available", http.StatusServiceUnavailable)
         return
     }
     defer s.anemoPower.ReleaseBard(bard)
-    
+
     // Исполняем песню
     song := r.URL.Path
     output, err := bard.Sing(r.Context(), song, lyrics, melody)
@@ -151,14 +166,14 @@ func (s *Stage) Perform(w http.ResponseWriter, r *http.Request) {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-    
+
     // Публикуем исполнение
     publishPerformance(w, output)
 }
 
 func prepareLyrics(r *http.Request) []string {
     env := os.Environ()
-    
+
     cgiLyrics := map[string]string{
         "GATEWAY_INTERFACE": "CGI/1.1",
         "SERVER_SOFTWARE":   "Venti/1.0",
@@ -172,29 +187,29 @@ func prepareLyrics(r *http.Request) []string {
         "CONTENT_LENGTH":    fmt.Sprintf("%d", r.ContentLength),
         "REMOTE_ADDR":       r.RemoteAddr,
     }
-    
+
     for key, values := range r.Header {
         envKey := "HTTP_" + strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
         cgiLyrics[envKey] = strings.Join(values, ", ")
     }
-    
+
     for key, value := range cgiLyrics {
         if value != "" {
             env = append(env, fmt.Sprintf("%s=%s", key, value))
         }
     }
-    
+
     return env
 }
 
 func publishPerformance(w http.ResponseWriter, data []byte) {
     parts := bytes.SplitN(data, []byte("\r\n\r\n"), 2)
-    
+
     if len(parts) < 2 {
         w.Write(data)
         return
     }
-    
+
     headers := bytes.Split(parts[0], []byte("\r\n"))
     for _, header := range headers {
         headerParts := bytes.SplitN(header, []byte(":"), 2)
@@ -204,6 +219,6 @@ func publishPerformance(w http.ResponseWriter, data []byte) {
             w.Header().Set(key, value)
         }
     }
-    
+
     w.Write(parts[1])
 }

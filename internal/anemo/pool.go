@@ -6,20 +6,13 @@ import (
     "sync"
     "sync/atomic"
     "time"
-)
 
-type Bard interface {
-    Sing(ctx context.Context, songPath string, lyrics []string, melody []byte) ([]byte, error)
-    Rest() error
-    IsHealthy() bool
-    GetSongCount() int
-    GetBirthTime() time.Time
-    GetLastSongTime() time.Time
-}
+    "venti/internal/bard"
+)
 
 type AnemoPower struct {
     config      *PowerConfig
-    bards       chan Bard
+    bards       chan bard.Bard
     activeCount int32
     mu          sync.RWMutex
     logger      Logger
@@ -30,14 +23,14 @@ type AnemoPower struct {
 }
 
 type PowerConfig struct {
-    MinBards         int
-    MaxBards         int
-    IdleTimeout      time.Duration
-    MaxLifetime      time.Duration
-    MaxSongsPerBard  int
+    MinBards        int
+    MaxBards        int
+    IdleTimeout     time.Duration
+    MaxLifetime     time.Duration
+    MaxSongsPerBard int
 }
 
-type BardFactory func() (Bard, error)
+type BardFactory func() (bard.Bard, error)
 
 type Logger interface {
     Debug(msg string, args ...interface{})
@@ -54,7 +47,7 @@ func NewAnemoPower(config *PowerConfig, factory BardFactory, logger Logger) (*An
     ctx, cancel := context.WithCancel(context.Background())
     power := &AnemoPower{
         config:  config,
-        bards:   make(chan Bard, config.MaxBards),
+        bards:   make(chan bard.Bard, config.MaxBards),
         factory: factory,
         logger:  logger,
         ctx:     ctx,
@@ -75,43 +68,43 @@ func NewAnemoPower(config *PowerConfig, factory BardFactory, logger Logger) (*An
     power.wg.Add(1)
     go power.flow()
 
-    logger.Info("Anemo power awakened", 
+    logger.Info("Anemo power awakened",
         "bards_summoned", config.MinBards,
         "max_power", config.MaxBards)
 
     return power, nil
 }
 
-func (p *AnemoPower) CallBard(ctx context.Context) (Bard, error) {
+func (p *AnemoPower) CallBard(ctx context.Context) (bard.Bard, error) {
     select {
-    case bard := <-p.bards:
-        return bard, nil
+    case b := <-p.bards:
+        return b, nil
     case <-ctx.Done():
         return nil, ctx.Err()
     }
 }
 
-func (p *AnemoPower) ReleaseBard(bard Bard) {
+func (p *AnemoPower) ReleaseBard(b bard.Bard) {
     // Проверяем, не пора ли барду на покой
-    if !bard.IsHealthy() ||
-        (p.config.MaxSongsPerBard > 0 && bard.GetSongCount() >= p.config.MaxSongsPerBard) ||
-        (p.config.MaxLifetime > 0 && time.Since(bard.GetBirthTime()) > p.config.MaxLifetime) {
+    if !b.IsHealthy() ||
+        (p.config.MaxSongsPerBard > 0 && b.GetSongCount() >= p.config.MaxSongsPerBard) ||
+        (p.config.MaxLifetime > 0 && time.Since(b.GetBirthTime()) > p.config.MaxLifetime) {
 
-        p.logger.Warn("Bard retires", 
-            "songs_performed", bard.GetSongCount(),
-            "lifetime", time.Since(bard.GetBirthTime()),
-            "healthy", bard.IsHealthy())
+        p.logger.Warn("Bard retires",
+            "songs_performed", b.GetSongCount(),
+            "lifetime", time.Since(b.GetBirthTime()),
+            "healthy", b.IsHealthy())
 
-        bard.Rest()
+        b.Rest()
         atomic.AddInt32(&p.activeCount, -1)
-        
+
         // Призываем нового барда
         newBard, err := p.factory()
         if err != nil {
             p.logger.Error("Failed to summon new bard", "error", err)
             return
         }
-        
+
         atomic.AddInt32(&p.activeCount, 1)
         p.bards <- newBard
         return
@@ -119,12 +112,12 @@ func (p *AnemoPower) ReleaseBard(bard Bard) {
 
     // Возвращаем барда в таверну
     select {
-    case p.bards <- bard:
+    case p.bards <- b:
     default:
         // Таверна переполнена - отправляем барда отдыхать
-        bard.Rest()
+        b.Rest()
         atomic.AddInt32(&p.activeCount, -1)
-        p.logger.Debug("Tavern is full, bard goes to rest", 
+        p.logger.Debug("Tavern is full, bard goes to rest",
             "active_bards", atomic.LoadInt32(&p.activeCount))
     }
 }
@@ -149,7 +142,7 @@ func (p *AnemoPower) flow() {
 func (p *AnemoPower) balance() {
     currentActive := atomic.LoadInt32(&p.activeCount)
     queueLen := len(p.bards)
-    
+
     // Если бардов достаточно, но они все в таверне - не нужно больше
     if queueLen > p.config.MinBards && currentActive > int32(p.config.MinBards) {
         return
@@ -157,48 +150,48 @@ func (p *AnemoPower) balance() {
 
     // Нужна подмога
     if queueLen == 0 && currentActive < int32(p.config.MaxBards) {
-        p.logger.Debug("Summoning additional bard", 
-            "current_power", currentActive, 
+        p.logger.Debug("Summoning additional bard",
+            "current_power", currentActive,
             "max_power", p.config.MaxBards)
-        
+
         bard, err := p.factory()
         if err != nil {
             p.logger.Error("Failed to summon bard", "error", err)
             return
         }
-        
+
         atomic.AddInt32(&p.activeCount, 1)
         p.bards <- bard
     }
 }
 
 func (p *AnemoPower) cleanupIdle() {
-    var bards []Bard
-    
+    var bards []bard.Bard
+
     // Собираем всех бардов из таверны
     for {
         select {
-        case bard := <-p.bards:
-            bards = append(bards, bard)
+        case b := <-p.bards:
+            bards = append(bards, b)
         default:
             goto DONE
         }
     }
-    
+
 DONE:
     // Отправляем лишних бездельничающих бардов отдыхать
     kept := 0
-    for _, bard := range bards {
-        idleTime := time.Since(bard.GetLastSongTime())
-        
+    for _, b := range bards {
+        idleTime := time.Since(b.GetLastSongTime())
+
         if idleTime > p.config.IdleTimeout && len(bards)-kept > p.config.MinBards {
-            bard.Rest()
+            b.Rest()
             atomic.AddInt32(&p.activeCount, -1)
-            p.logger.Debug("Idle bard goes to rest", 
-                "idle_time", idleTime, 
+            p.logger.Debug("Idle bard goes to rest",
+                "idle_time", idleTime,
                 "remaining_bards", atomic.LoadInt32(&p.activeCount))
         } else {
-            p.bards <- bard
+            p.bards <- b
             kept++
         }
     }
@@ -207,20 +200,20 @@ DONE:
 func (p *AnemoPower) Close() error {
     p.cancel()
     p.wg.Wait()
-    
+
     close(p.bards)
-    for bard := range p.bards {
-        bard.Rest()
+    for b := range p.bards {
+        b.Rest()
     }
-    
+
     return nil
 }
 
 func (p *AnemoPower) GetStats() map[string]interface{} {
     return map[string]interface{}{
-        "active_bards": atomic.LoadInt32(&p.activeCount),
+        "active_bards":  atomic.LoadInt32(&p.activeCount),
         "resting_bards": len(p.bards),
-        "max_bards": p.config.MaxBards,
-        "min_bards": p.config.MinBards,
+        "max_bards":     p.config.MaxBards,
+        "min_bards":     p.config.MinBards,
     }
 }
