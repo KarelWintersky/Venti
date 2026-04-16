@@ -10,7 +10,6 @@ import (
 
 type Config struct {
     Listener   ListenerConfig   `yaml:"listener"`
-    ScriptRoot string           `yaml:"script_root"`
     PerlPath   string           `yaml:"perl_path"`
     AnemoPower AnemoPowerConfig `yaml:"anemo_power"`
     Timeouts   TimeoutConfig    `yaml:"timeouts"`
@@ -69,32 +68,22 @@ func (c *Config) Validate() error {
     if c.Listener.Type != "unix" && c.Listener.Type != "tcp" {
         return fmt.Errorf("listener.type must be 'unix' or 'tcp'")
     }
-    
+
     // Проверяем адрес
     if c.Listener.Address == "" {
         return fmt.Errorf("listener.address is required")
     }
-    
-    // Проверяем корень скриптов
-    if c.ScriptRoot == "" {
-        return fmt.Errorf("script_root is required")
-    }
-    
-    // Проверяем существование директории со скриптами
-    if _, err := os.Stat(c.ScriptRoot); os.IsNotExist(err) {
-        return fmt.Errorf("script_root directory does not exist: %s", c.ScriptRoot)
-    }
-    
+
     // Устанавливаем значения по умолчанию для Perl пути
     if c.PerlPath == "" {
         c.PerlPath = "/usr/bin/perl"
     }
-    
+
     // Проверяем существование Perl
     if _, err := os.Stat(c.PerlPath); os.IsNotExist(err) {
         return fmt.Errorf("perl binary not found: %s", c.PerlPath)
     }
-    
+
     // Валидируем настройки пула
     if c.AnemoPower.MinBards < 1 {
         c.AnemoPower.MinBards = 1
@@ -102,7 +91,7 @@ func (c *Config) Validate() error {
     if c.AnemoPower.MaxBards < c.AnemoPower.MinBards {
         c.AnemoPower.MaxBards = c.AnemoPower.MinBards
     }
-    
+
     // Таймауты по умолчанию
     if c.Timeouts.SongDuration == 0 {
         c.Timeouts.SongDuration = 30
@@ -110,12 +99,12 @@ func (c *Config) Validate() error {
     if c.Timeouts.TuneUp == 0 {
         c.Timeouts.TuneUp = 5
     }
-    
+
     // Лимиты по умолчанию
     if c.Limits.MaxSongsPerBard == 0 {
         c.Limits.MaxSongsPerBard = 1000
     }
-    
+
     return nil
 }
 

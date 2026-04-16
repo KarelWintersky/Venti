@@ -10,10 +10,11 @@ import (
     "venti/internal/bard"
 )
 
+// AnemoPower - сила анемо, управляющая бардами
 type AnemoPower struct {
     config      *PowerConfig
-    bards       chan bard.Bard
-    activeCount int32
+    tavern      chan bard.Bard  // таверна, где отдыхают барды
+    activeBards int32
     mu          sync.RWMutex
     logger      Logger
     factory     BardFactory
@@ -22,12 +23,13 @@ type AnemoPower struct {
     wg          sync.WaitGroup
 }
 
+// PowerConfig - конфигурация силы анемо
 type PowerConfig struct {
-    MinBards        int
-    MaxBards        int
-    IdleTimeout     time.Duration
-    MaxLifetime     time.Duration
-    MaxSongsPerBard int
+    MinBards           int           // минимальное количество бардов
+    MaxBards           int           // максимальное количество бардов
+    IdleTimeout        time.Duration // время бездействия перед уходом на покой
+    MaxLifetime        time.Duration // максимальное время жизни барда
+    MaxSongsPerBard    int           // максимальное количество песен на барда
 }
 
 type BardFactory func() (bard.Bard, error)
@@ -39,6 +41,7 @@ type Logger interface {
     Error(msg string, args ...interface{})
 }
 
+// NewAnemoPower - пробудить силу анемо
 func NewAnemoPower(config *PowerConfig, factory BardFactory, logger Logger) (*AnemoPower, error) {
     if config.MinBards > config.MaxBards {
         return nil, fmt.Errorf("min_bards cannot exceed max_bards")
@@ -47,7 +50,7 @@ func NewAnemoPower(config *PowerConfig, factory BardFactory, logger Logger) (*An
     ctx, cancel := context.WithCancel(context.Background())
     power := &AnemoPower{
         config:  config,
-        bards:   make(chan bard.Bard, config.MaxBards),
+        tavern:  make(chan bard.Bard, config.MaxBards),
         factory: factory,
         logger:  logger,
         ctx:     ctx,
@@ -60,43 +63,45 @@ func NewAnemoPower(config *PowerConfig, factory BardFactory, logger Logger) (*An
         if err != nil {
             return nil, fmt.Errorf("failed to summon bard: %w", err)
         }
-        power.bards <- bard
-        atomic.AddInt32(&power.activeCount, 1)
+        power.tavern <- bard
+        atomic.AddInt32(&power.activeBards, 1)
     }
 
     // Запускаем циркуляцию энергии анемо
     power.wg.Add(1)
     go power.flow()
 
-    logger.Info("Anemo power awakened",
+    logger.Info("🌪️ Anemo power awakened",
         "bards_summoned", config.MinBards,
         "max_power", config.MaxBards)
 
     return power, nil
 }
 
+// CallBard - призвать барда из таверны
 func (p *AnemoPower) CallBard(ctx context.Context) (bard.Bard, error) {
     select {
-    case b := <-p.bards:
+    case b := <-p.tavern:
         return b, nil
     case <-ctx.Done():
         return nil, ctx.Err()
     }
 }
 
+// ReleaseBard - отпустить барда в таверну
 func (p *AnemoPower) ReleaseBard(b bard.Bard) {
     // Проверяем, не пора ли барду на покой
     if !b.IsHealthy() ||
-        (p.config.MaxSongsPerBard > 0 && b.GetSongCount() >= p.config.MaxSongsPerBard) ||
+        (p.config.MaxSongsPerBard > 0 && b.GetSongsCount() >= p.config.MaxSongsPerBard) ||
         (p.config.MaxLifetime > 0 && time.Since(b.GetBirthTime()) > p.config.MaxLifetime) {
 
-        p.logger.Warn("Bard retires",
-            "songs_performed", b.GetSongCount(),
+        p.logger.Warn("🎭 Bard retires from the stage",
+            "songs_performed", b.GetSongsCount(),
             "lifetime", time.Since(b.GetBirthTime()),
             "healthy", b.IsHealthy())
 
         b.Rest()
-        atomic.AddInt32(&p.activeCount, -1)
+        atomic.AddInt32(&p.activeBards, -1)
 
         // Призываем нового барда
         newBard, err := p.factory()
@@ -105,23 +110,24 @@ func (p *AnemoPower) ReleaseBard(b bard.Bard) {
             return
         }
 
-        atomic.AddInt32(&p.activeCount, 1)
-        p.bards <- newBard
+        atomic.AddInt32(&p.activeBards, 1)
+        p.tavern <- newBard
         return
     }
 
     // Возвращаем барда в таверну
     select {
-    case p.bards <- b:
+    case p.tavern <- b:
     default:
         // Таверна переполнена - отправляем барда отдыхать
         b.Rest()
-        atomic.AddInt32(&p.activeCount, -1)
-        p.logger.Debug("Tavern is full, bard goes to rest",
-            "active_bards", atomic.LoadInt32(&p.activeCount))
+        atomic.AddInt32(&p.activeBards, -1)
+        p.logger.Debug("🍺 Tavern is full, bard goes to rest",
+            "active_bards", atomic.LoadInt32(&p.activeBards))
     }
 }
 
+// flow - циркуляция энергии анемо (управление пулом)
 func (p *AnemoPower) flow() {
     defer p.wg.Done()
 
@@ -139,18 +145,19 @@ func (p *AnemoPower) flow() {
     }
 }
 
+// balance - балансировка количества бардов
 func (p *AnemoPower) balance() {
-    currentActive := atomic.LoadInt32(&p.activeCount)
-    queueLen := len(p.bards)
+    currentActive := atomic.LoadInt32(&p.activeBards)
+    queueLen := len(p.tavern)
 
     // Если бардов достаточно, но они все в таверне - не нужно больше
     if queueLen > p.config.MinBards && currentActive > int32(p.config.MinBards) {
         return
     }
 
-    // Нужна подмога
+    // Нужна подмога - призываем нового барда
     if queueLen == 0 && currentActive < int32(p.config.MaxBards) {
-        p.logger.Debug("Summoning additional bard",
+        p.logger.Debug("🎵 Summoning additional bard",
             "current_power", currentActive,
             "max_power", p.config.MaxBards)
 
@@ -160,18 +167,19 @@ func (p *AnemoPower) balance() {
             return
         }
 
-        atomic.AddInt32(&p.activeCount, 1)
-        p.bards <- bard
+        atomic.AddInt32(&p.activeBards, 1)
+        p.tavern <- bard
     }
 }
 
+// cleanupIdle - отправляем бездельничающих бардов на покой
 func (p *AnemoPower) cleanupIdle() {
     var bards []bard.Bard
 
     // Собираем всех бардов из таверны
     for {
         select {
-        case b := <-p.bards:
+        case b := <-p.tavern:
             bards = append(bards, b)
         default:
             goto DONE
@@ -179,40 +187,42 @@ func (p *AnemoPower) cleanupIdle() {
     }
 
 DONE:
-    // Отправляем лишних бездельничающих бардов отдыхать
+    // Отправляем лишних бездельников отдыхать
     kept := 0
     for _, b := range bards {
         idleTime := time.Since(b.GetLastSongTime())
 
         if idleTime > p.config.IdleTimeout && len(bards)-kept > p.config.MinBards {
             b.Rest()
-            atomic.AddInt32(&p.activeCount, -1)
-            p.logger.Debug("Idle bard goes to rest",
+            atomic.AddInt32(&p.activeBards, -1)
+            p.logger.Debug("😴 Idle bard goes to rest",
                 "idle_time", idleTime,
-                "remaining_bards", atomic.LoadInt32(&p.activeCount))
+                "remaining_bards", atomic.LoadInt32(&p.activeBards))
         } else {
-            p.bards <- b
+            p.tavern <- b
             kept++
         }
     }
 }
 
+// Close - закрыть таверну, отпустить всех бардов
 func (p *AnemoPower) Close() error {
     p.cancel()
     p.wg.Wait()
 
-    close(p.bards)
-    for b := range p.bards {
+    close(p.tavern)
+    for b := range p.tavern {
         b.Rest()
     }
 
     return nil
 }
 
+// GetStats - получить статистику выступлений
 func (p *AnemoPower) GetStats() map[string]interface{} {
     return map[string]interface{}{
-        "active_bards":  atomic.LoadInt32(&p.activeCount),
-        "resting_bards": len(p.bards),
+        "active_bards":  atomic.LoadInt32(&p.activeBards),
+        "resting_bards": len(p.tavern),
         "max_bards":     p.config.MaxBards,
         "min_bards":     p.config.MinBards,
     }
