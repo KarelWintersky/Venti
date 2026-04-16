@@ -1,0 +1,33 @@
+[Unit]
+Description=Venti - Anemo Archon FastCGI Pool
+After=network.target
+Documentation=https://github.com/KarelWintersky/Venti
+
+[Service]
+Type=simple
+User=venti
+Group=venti
+ExecStart=/usr/local/bin/venti --config /etc/venti/venti.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# Безопасность
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/venti /run/venti /var/www/scripts
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=venti
+
+[Install]
+WantedBy=multi-user.target

@@ -3,10 +3,11 @@
 # Слушатель
 listener:
   type: unix  # unix или tcp
-  address: /run/venti/venti.sock
+#  address: /run/venti/venti.sock
+  address: /var/www.projects/Venti/venti.sock
 
 # Корень со скриптами
-script_root: /var/www/scripts
+script_root: /var/www/47news/
 
 # Сила Анемо (пул процессов)
 anemo_power:
@@ -30,7 +31,8 @@ timeouts:
 # Логирование
 logging:
   level: info            # debug, info, warn, error
-  file: /var/log/venti/access.log
+#  file: /var/log/venti/access.log
+  file: /var/www.projects/Venti/logs/access.log
   format: json
 
 # Путь к Perl
