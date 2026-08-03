@@ -3,9 +3,12 @@ package main
 import (
     "flag"
     "fmt"
+    "io"
     "log"
+    "log/slog"
     "os"
     "os/signal"
+    "strings"
     "syscall"
     "time"
 
@@ -17,29 +20,6 @@ import (
 
 var Version = "1.0.0"
 var BuildTime = "unknown"
-
-type SimpleLogger struct {
-    logger *log.Logger
-    level  string
-}
-
-func (l *SimpleLogger) Info(msg string, args ...interface{}) {
-    l.logger.Printf("✨ [INFO] "+msg, args...)
-}
-
-func (l *SimpleLogger) Error(msg string, args ...interface{}) {
-    l.logger.Printf("💔 [ERROR] "+msg, args...)
-}
-
-func (l *SimpleLogger) Debug(msg string, args ...interface{}) {
-    if l.level == "debug" {
-        l.logger.Printf("🎵 [DEBUG] "+msg, args...)
-    }
-}
-
-func (l *SimpleLogger) Warn(msg string, args ...interface{}) {
-    l.logger.Printf("⚠️ [WARN] "+msg, args...)
-}
 
 func printBanner() {
     banner := `
@@ -134,7 +114,8 @@ func main() {
 
     anemoPower, err := anemo.NewAnemoPower(anemoConfig, bardFactory, logger)
     if err != nil {
-        log.Fatalf("💔 Failed to awaken Anemo power: %v", err)
+        logger.Error("💔 Failed to awaken Anemo power", "error", err)
+        os.Exit(1)
     }
     defer anemoPower.Close()
 
@@ -188,12 +169,13 @@ func main() {
     logger.Info("🎤 The stage is set! Waiting for the audience to arrive...")
 
     if err := lyreServer.Play(); err != nil {
-        log.Fatalf("💔 The Skyward Lyre broke: %v", err)
+        logger.Error("💔 The Skyward Lyre broke", "error", err)
+        os.Exit(1)
     }
 }
 
-func setupLogging(cfg *config.Config) *SimpleLogger {
-    logOutput := os.Stdout
+func setupLogging(cfg *config.Config) *slog.Logger {
+    logOutput := io.Writer(os.Stdout)
     if cfg.Logging.File != "" {
         file, err := os.OpenFile(cfg.Logging.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
         if err != nil {
@@ -203,10 +185,28 @@ func setupLogging(cfg *config.Config) *SimpleLogger {
         }
     }
 
-    return &SimpleLogger{
-        logger: log.New(logOutput, "", log.LstdFlags),
-        level:  cfg.Logging.Level,
+    var level slog.Level
+    switch strings.ToLower(cfg.Logging.Level) {
+    case "debug":
+        level = slog.LevelDebug
+    case "warn", "warning":
+        level = slog.LevelWarn
+    case "error":
+        level = slog.LevelError
+    default:
+        level = slog.LevelInfo
     }
+
+    opts := &slog.HandlerOptions{Level: level}
+
+    var handler slog.Handler
+    if strings.ToLower(cfg.Logging.Format) == "json" {
+        handler = slog.NewJSONHandler(logOutput, opts)
+    } else {
+        handler = slog.NewTextHandler(logOutput, opts)
+    }
+
+    return slog.New(handler)
 }
 
 func printHelp() {
