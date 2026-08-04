@@ -10,6 +10,7 @@ import (
     "net"
     "os"
     "os/signal"
+    "runtime/debug"
     "strings"
     "syscall"
     "time"
@@ -20,8 +21,37 @@ import (
     "venti/internal/lyre"
 )
 
-var Version = "1.0.0"
+// Version и BuildTime заполняются при сборке через -ldflags "-X main.Version=...".
+// Если не заданы - выводятся из встроенных git-данных (debug.ReadBuildInfo).
+var Version = ""
 var BuildTime = "unknown"
+
+func init() {
+    if Version != "" {
+        return
+    }
+
+    if info, ok := debug.ReadBuildInfo(); ok {
+        for _, s := range info.Settings {
+            switch s.Key {
+            case "vcs.revision":
+                if len(s.Value) >= 7 {
+                    Version = s.Value[:7]
+                } else {
+                    Version = s.Value
+                }
+            case "vcs.time":
+                if BuildTime == "unknown" {
+                    BuildTime = s.Value
+                }
+            }
+        }
+    }
+
+    if Version == "" {
+        Version = "dev"
+    }
+}
 
 func printBanner() {
     banner := `
