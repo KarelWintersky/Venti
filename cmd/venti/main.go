@@ -77,11 +77,13 @@ func main() {
         configPath  string
         showVersion bool
         showHelp    bool
+        verbose     bool
     )
 
     flag.StringVar(&configPath, "config", "", "Path to configuration file")
     flag.BoolVar(&showVersion, "version", false, "Show version information")
     flag.BoolVar(&showHelp, "help", false, "Show this help message")
+    flag.BoolVar(&verbose, "verbose", false, "Also write logs to console (in addition to logging.file)")
     flag.Parse()
 
     if showVersion {
@@ -120,7 +122,7 @@ func main() {
         log.Fatalf("💔 Failed to read the sacred texts: %v", err)
     }
 
-    logger := setupLogging(cfg)
+    logger := setupLogging(cfg, verbose)
 
     logger.Info("🎶 Venti awakens from his slumber...",
         "version", Version,
@@ -229,14 +231,18 @@ func main() {
     logger.Info("🌬️ Farewell, dear travelers! May the wind guide your paths!")
 }
 
-func setupLogging(cfg *config.Config) *slog.Logger {
+func setupLogging(cfg *config.Config, verbose bool) *slog.Logger {
     logOutput := io.Writer(os.Stdout)
     if cfg.Logging.File != "" {
         file, err := os.OpenFile(cfg.Logging.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
         if err != nil {
             log.Printf("Warning: cannot write to %s, using stdout", cfg.Logging.File)
         } else {
-            logOutput = file
+            if verbose {
+                logOutput = io.MultiWriter(file, os.Stdout)
+            } else {
+                logOutput = file
+            }
         }
     }
 
@@ -279,9 +285,12 @@ Options:
 
   --help              Show this melody (help)
 
+  --verbose           Also print logs to console, even when logging.file is set
+
 Examples:
   venti                                    # Start with default config
   venti --config ./my-melody.yaml          # Start with custom config
+  venti --config ./configs/venti.yaml --verbose  # Start and watch logs live
   venti --version                          # Feel the wind's wisdom
 
 The wind will guide your Perl scripts to the stage! 🎵
