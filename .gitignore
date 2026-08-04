@@ -1,0 +1,5 @@
+build/
+logs/
+.idea/
+_todo/
+session-*.md
