@@ -21,10 +21,12 @@ import (
     "venti/internal/lyre"
 )
 
-// Version и BuildTime заполняются при сборке через -ldflags "-X main.Version=...".
+// Version, BuildTime и Commit заполняются при сборке через
+// -ldflags "-X main.Version=... -X main.BuildTime=... -X main.Commit=...".
 // Если не заданы - выводятся из встроенных git-данных (debug.ReadBuildInfo).
 var Version = ""
 var BuildTime = "unknown"
+var Commit = ""
 
 func init() {
     if Version != "" {
@@ -36,9 +38,9 @@ func init() {
             switch s.Key {
             case "vcs.revision":
                 if len(s.Value) >= 7 {
-                    Version = s.Value[:7]
+                    Commit = s.Value[:7]
                 } else {
-                    Version = s.Value
+                    Commit = s.Value
                 }
             case "vcs.time":
                 if BuildTime == "unknown" {
@@ -48,6 +50,9 @@ func init() {
         }
     }
 
+    if Version == "" {
+        Version = Commit
+    }
     if Version == "" {
         Version = "dev"
     }
@@ -87,7 +92,7 @@ func main() {
     flag.Parse()
 
     if showVersion {
-        fmt.Printf("Venti %s (built at %s)\n", Version, BuildTime)
+        fmt.Printf("Venti %s (Build at: %s, Commit: %s)\n", Version, BuildTime, Commit)
         fmt.Println("🌬️ The Windborne Bard stands ready to perform")
         os.Exit(0)
     }

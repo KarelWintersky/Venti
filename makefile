@@ -2,13 +2,18 @@
 
 BINARY_NAME=venti
 BUILD_DIR=build
-VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "1.0.0")
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+# Версия = semver из первой строки последнего коммита (если это semver), иначе хэш
+VERSION=$(shell printf '%s' "$$(git log -1 --pretty=%s 2>/dev/null)" | grep -Eo '^[0-9]+\.[0-9]+\.[0-9]+' || true)
+ifeq ($(strip $(VERSION)),)
+VERSION=$(GIT_COMMIT)
+endif
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GOOS=linux
 GOARCH=amd64
 
 # Флаги линковки с передачей версии
-LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -s -w"
+LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(GIT_COMMIT) -s -w"
 
 build:
 	@echo "🎵 Building Venti $(VERSION) for $(GOOS)/$(GOARCH)..."
@@ -37,7 +42,7 @@ build-static:
 	@echo "🎵 Building static Venti..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-		-ldflags="-s -w -extldflags '-static' -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" \
+		-ldflags="-s -w -extldflags '-static' -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(GIT_COMMIT)" \
 		-tags netgo \
 		-installsuffix netgo \
 		-o $(BUILD_DIR)/$(BINARY_NAME)-static \
