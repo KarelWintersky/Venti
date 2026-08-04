@@ -18,8 +18,9 @@ type Config struct {
 }
 
 type ListenerConfig struct {
-    Type    string `yaml:"type"`    // unix или tcp
-    Address string `yaml:"address"` // путь к сокету или адрес:порт
+    Type    string      `yaml:"type"`    // unix или tcp
+    Address string      `yaml:"address"` // путь к сокету или адрес:порт
+    Mode    os.FileMode `yaml:"mode"`    // права на unix-сокет
 }
 
 type AnemoPowerConfig struct {
@@ -30,8 +31,9 @@ type AnemoPowerConfig struct {
 }
 
 type TimeoutConfig struct {
-    SongDuration int `yaml:"song_duration"` // seconds
-    TuneUp       int `yaml:"tune_up"`       // seconds
+    SongDuration  int `yaml:"song_duration"` // seconds
+    TuneUp        int `yaml:"tune_up"`       // seconds
+    ShutdownGrace int `yaml:"shutdown_grace"` // seconds
 }
 
 type LogConfig struct {
@@ -41,8 +43,9 @@ type LogConfig struct {
 }
 
 type LimitsConfig struct {
-    MaxVerseSize     int64 `yaml:"max_verse_size"`
-    MaxSongsPerBard  int   `yaml:"max_songs_per_bard"`
+    MaxVerseSize    int64  `yaml:"max_verse_size"`
+    MaxSongsPerBard int    `yaml:"max_songs_per_bard"`
+    DocumentRoot    string `yaml:"document_root"` // ограничение SCRIPT_FILENAME (пустое - без ограничений)
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -74,6 +77,11 @@ func (c *Config) Validate() error {
         return fmt.Errorf("listener.address is required")
     }
 
+    // Права на unix-сокет по умолчанию
+    if c.Listener.Mode == 0 {
+        c.Listener.Mode = 0660
+    }
+
     // Устанавливаем значения по умолчанию для Perl пути
     if c.PerlPath == "" {
         c.PerlPath = "/usr/bin/perl"
@@ -99,10 +107,16 @@ func (c *Config) Validate() error {
     if c.Timeouts.TuneUp == 0 {
         c.Timeouts.TuneUp = 5
     }
+    if c.Timeouts.ShutdownGrace == 0 {
+        c.Timeouts.ShutdownGrace = 10
+    }
 
     // Лимиты по умолчанию
     if c.Limits.MaxSongsPerBard == 0 {
         c.Limits.MaxSongsPerBard = 1000
+    }
+    if c.Limits.MaxVerseSize == 0 {
+        c.Limits.MaxVerseSize = 10 << 20 // 10 MiB
     }
 
     return nil
@@ -114,6 +128,10 @@ func (c *Config) GetSongDuration() time.Duration {
 
 func (c *Config) GetTuneUpTimeout() time.Duration {
     return time.Duration(c.Timeouts.TuneUp) * time.Second
+}
+
+func (c *Config) GetShutdownGrace() time.Duration {
+    return time.Duration(c.Timeouts.ShutdownGrace) * time.Second
 }
 
 func (c *Config) GetIdleTimeout() time.Duration {

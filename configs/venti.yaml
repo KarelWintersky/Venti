@@ -3,8 +3,9 @@
 # Слушатель
 listener:
   type: unix  # unix или tcp
-#  address: /run/venti/venti.sock
+  # address: /run/venti/venti.sock
   address: /var/www.projects/Venti/venti.sock
+  mode: 0660                 # права на unix-сокет (0660 - только владелец и группа)
 
 # Путь к Perl
 perl_path: /usr/bin/perl
@@ -18,7 +19,7 @@ anemo_power:
   max_bards: 20
   
   # Время бездействия перед уходом на покой (сек)
-  idle_timeout: 60
+  idle_timeout: 1
   
   # Время жизни барда (сек)
   max_lifetime: 3600
@@ -26,7 +27,8 @@ anemo_power:
 # Время исполнения песен (таймауты)
 timeouts:
   song_duration: 30      # исполнение скрипта
-  tune_up: 5             # запуск процесса
+  tune_up: 5             # ожидание барда в таверне
+  shutdown_grace: 10     # ожидание завершения идущих выступлений при остановке
 
 # Логирование
 logging:
@@ -39,3 +41,4 @@ logging:
 limits:
   max_verse_size: 10485760   # размер стиха (тела запроса) 10 MB
   max_songs_per_bard: 1000   # песен на барда
+  # document_root: /var/www   # разрешать SCRIPT_FILENAME только внутри этого каталога

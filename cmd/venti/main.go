@@ -1,11 +1,13 @@
 package main
 
 import (
+    "errors"
     "flag"
     "fmt"
     "io"
     "log"
     "log/slog"
+    "net"
     "os"
     "os/signal"
     "strings"
@@ -96,7 +98,8 @@ func main() {
 
     // Создаем труппу бардов
     troupe := &bard.Troupe{
-        PerlPath: cfg.PerlPath,
+        PerlPath:    cfg.PerlPath,
+        SongTimeout: cfg.GetSongDuration(),
     }
 
     // Пробуждаем силу анемо
@@ -133,7 +136,7 @@ func main() {
         }()
     }
 
-    stage := bard.NewStage(anemoPower)
+    stage := bard.NewStage(cfg, anemoPower)
     lyreServer := lyre.NewLyre(cfg, stage, logger)
 
     // Слушаем сиглы (зов путешественников)
@@ -148,16 +151,33 @@ func main() {
                 newCfg, err := config.LoadConfig(configPath)
                 if err != nil {
                     logger.Error("Failed to reload the sacred texts", "error", err)
-                } else {
-                    cfg = newCfg
-                    logger.Info("📜 New setlist learned!")
+                    continue
                 }
+
+                // Применяем динамические параметры пула на лету
+                if err := anemoPower.ApplyConfig(&anemo.PowerConfig{
+                    MinBards:        newCfg.AnemoPower.MinBards,
+                    MaxBards:        newCfg.AnemoPower.MaxBards,
+                    IdleTimeout:     newCfg.GetIdleTimeout(),
+                    MaxLifetime:     newCfg.GetMaxLifetime(),
+                    MaxSongsPerBard: newCfg.Limits.MaxSongsPerBard,
+                }); err != nil {
+                    logger.Error("Failed to apply new setlist", "error", err)
+                    continue
+                }
+
+                // Обновляем общий конфиг (Stage и лимиты читают его по указателю)
+                *cfg = *newCfg
+                logger.Info("📜 New setlist learned!",
+                    "min_bards", cfg.AnemoPower.MinBards,
+                    "max_bards", cfg.AnemoPower.MaxBards)
+
             case syscall.SIGINT, syscall.SIGTERM:
                 logger.Info("🎵 The performance ends... Venti returns to Mondstadt...")
-                logger.Info("🌬️ Farewell, dear travelers! May the wind guide your paths!")
-                lyreServer.Silence()
-                time.Sleep(2 * time.Second)
-                os.Exit(0)
+                if err := lyreServer.Silence(); err != nil {
+                    logger.Error("Failed to fall silent", "error", err)
+                }
+                return
             }
         }
     }()
@@ -168,10 +188,15 @@ func main() {
 
     logger.Info("🎤 The stage is set! Waiting for the audience to arrive...")
 
-    if err := lyreServer.Play(); err != nil {
+    if err := lyreServer.Play(); err != nil && !errors.Is(err, net.ErrClosed) {
         logger.Error("💔 The Skyward Lyre broke", "error", err)
+        anemoPower.Close()
         os.Exit(1)
     }
+
+    // Ждем завершения идущих выступлений, затем закрываем таверну
+    lyreServer.Drain(cfg.GetShutdownGrace())
+    logger.Info("🌬️ Farewell, dear travelers! May the wind guide your paths!")
 }
 
 func setupLogging(cfg *config.Config) *slog.Logger {
@@ -210,7 +235,7 @@ func setupLogging(cfg *config.Config) *slog.Logger {
 }
 
 func printHelp() {
-    fmt.Println(`
+    fmt.Print(`
 🌬️ Venti - The Windborne Bard's FastCGI Pool
 
 Usage:

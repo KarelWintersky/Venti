@@ -7,6 +7,8 @@ import (
     "net/http/fcgi"
     "os"
     "strings"
+    "sync"
+    "time"
 
     "venti/internal/config"
 )
@@ -17,6 +19,7 @@ type Lyre struct {
     handler  http.Handler
     logger   Logger
     listener net.Listener
+    wg       sync.WaitGroup
 }
 
 type Logger interface {
@@ -42,6 +45,13 @@ func NewLyre(cfg *config.Config, stage Stage, logger Logger) *Lyre {
     }
 }
 
+// ServeHTTP - учитываем выступления в процессе (для graceful shutdown)
+func (l *Lyre) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    l.wg.Add(1)
+    defer l.wg.Done()
+    l.handler.ServeHTTP(w, r)
+}
+
 // Play - начать играть на лире (запустить сервер)
 func (l *Lyre) Play() error {
     var err error
@@ -64,12 +74,13 @@ func (l *Lyre) Play() error {
             return fmt.Errorf("failed to listen on unix socket: %w", err)
         }
 
-        if err := os.Chmod(l.config.Listener.Address, 0666); err != nil {
+        if err := os.Chmod(l.config.Listener.Address, l.config.Listener.Mode); err != nil {
             l.logger.Error("Failed to chmod socket", "error", err)
         }
 
         l.logger.Info("🎵 The Skyward Lyre plays on the winds",
-            "path", l.config.Listener.Address)
+            "path", l.config.Listener.Address,
+            "mode", fmt.Sprintf("%04o", l.config.Listener.Mode))
 
     case "tcp":
         l.listener, err = net.Listen("tcp", l.config.Listener.Address)
@@ -88,14 +99,30 @@ func (l *Lyre) Play() error {
     l.logger.Info("✨ May the wind bring many songs to perform ✨")
 
     // Используем встроенный FastCGI сервер
-    return fcgi.Serve(l.listener, l.handler)
+    return fcgi.Serve(l.listener, l)
 }
 
-// Silence - лира замолкает (остановка сервера)
+// Silence - лира замолкает (остановка приема новых выступлений)
 func (l *Lyre) Silence() error {
     l.logger.Info("🎵 The Skyward Lyre falls silent... Until we meet again! 🎵")
     if l.listener != nil {
         return l.listener.Close()
     }
     return nil
+}
+
+// Drain - ждем завершения идущих выступлений, но не дольше grace-периода
+func (l *Lyre) Drain(grace time.Duration) {
+    done := make(chan struct{})
+    go func() {
+        l.wg.Wait()
+        close(done)
+    }()
+
+    select {
+    case <-done:
+        l.logger.Info("🌬️ All performances concluded")
+    case <-time.After(grace):
+        l.logger.Warn("⏳ Grace period expired, some performances still in progress", "grace", grace)
+    }
 }

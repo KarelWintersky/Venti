@@ -218,6 +218,37 @@ func (p *AnemoPower) Close() error {
     return nil
 }
 
+// ApplyConfig - обновить динамические параметры пула на лету (после SIGHUP)
+func (p *AnemoPower) ApplyConfig(newCfg *PowerConfig) error {
+    if newCfg.MinBards > newCfg.MaxBards {
+        return fmt.Errorf("min_bards cannot exceed max_bards")
+    }
+
+    p.mu.Lock()
+    defer p.mu.Unlock()
+
+    p.config.MinBards = newCfg.MinBards
+    p.config.MaxBards = newCfg.MaxBards
+    p.config.IdleTimeout = newCfg.IdleTimeout
+    p.config.MaxLifetime = newCfg.MaxLifetime
+    p.config.MaxSongsPerBard = newCfg.MaxSongsPerBard
+
+    // Добираем бардов до нового минимума (если позволяет вместимость таверны)
+    for atomic.LoadInt32(&p.activeBards) < int32(newCfg.MinBards) &&
+        len(p.tavern) < cap(p.tavern) {
+
+        bard, err := p.factory()
+        if err != nil {
+            p.logger.Error("Failed to summon bard on reload", "error", err)
+            break
+        }
+        p.tavern <- bard
+        atomic.AddInt32(&p.activeBards, 1)
+    }
+
+    return nil
+}
+
 // GetStats - получить статистику выступлений
 func (p *AnemoPower) GetStats() map[string]interface{} {
     return map[string]interface{}{
